@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+  boardroom:
+    build:
+      context: .
+      dockerfile: Dockerfile.generic
+    container_name: sovereign_boardroom
+    command: ["python", "src/boardroom/service.py"]
+    volumes:
+      - ./Governance:/data/ledger
+    environment:
+      - DATA_DIR=/data
+      - PYTHONPATH=/app
+    networks:
+      - sovereign_net
+
+  evidence:
+    build:
+      context: .
+      dockerfile: Dockerfile.generic
+    container_name: sovereign_evidence
+    command: ["python", "src/agents/evidence_validator.py"]
+    volumes:
+      - ./Evidence:/data/evidence
+      - ./Governance:/data/ledger
+    environment:
+      - EVIDENCE_TRACK=stable
+      - DATA_DIR=/data
+      - PYTHONPATH=/app
+    depends_on:
+      - boardroom
+    networks:
+      - sovereign_net
+
+  property:
+    build:
+      context: .
+      dockerfile: Dockerfile.generic
+    container_name: sovereign_property
+    command: ["python", "src/agents/property_analyst.py"]
+    volumes:
+      - ./Property:/data/property
+      - ./Governance:/data/ledger
+    environment:
+      - PROPERTY_TRACK=insider
+      - DATA_DIR=/data
+      - PYTHONPATH=/app
+    depends_on:
+      - boardroom
+    networks:
+      - sovereign_net
+
+  cron:
+    build:
+      context: docker/cron
+    container_name: sovereign_cron
+    volumes:
+      - ./Governance:/data/ledger
+      - ./Evidence:/data/evidence
+      - ./Property:/data/property
+    environment:
+      - DATA_DIR=/data
+      - PYTHONPATH=/app
+    networks:
+      - sovereign_net
+
+networks:
+  sovereign_net:
+    driver: bridge
