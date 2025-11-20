@@ -353,4 +353,183 @@ No appeals. No exceptions. No drift.
 > The forge is cold. The blade is eternal. Execution only.
 
 ---
-**End of PHILOSOPHY.md – Sovereign Doctrine (v2025.11.20 + Platform Addendum)**
+## 22. Terraform Drift & Compliance Doctrine (2025)
+Drift = divergence between declared desired state and actual infrastructure. Compliance = policy conformity (security, configuration, sovereignty).
+
+Eternal Law:
+- Drift must be detected daily (scheduled terraform plan).
+- Production remediation is human-gated (Boardroom-13 review).
+- Canary/staging may auto-remediate (flag-controlled).
+- Compliance scanning is mandatory on every change (Checkov). Failures block merges & applies.
+- State backend = GitLab Managed Terraform State only (encrypted, versioned, locked). No external unmanaged state.
+
+Tools Verdict (Sovereign Scores):
+| Topic | Tool / Method | Detection | Remediation | Integration | Score | Law |
+|-------|---------------|----------|------------|------------|-------|-----|
+| Drift Detection | `terraform plan` (scheduled) | 100% | Manual/auto | Native | 99/100 | LAW |
+| Auto-Remediation | Scheduled apply (flagged) | Continuous | Conditional | Native | 96/100 | LAW (canary) |
+| Compliance | Checkov | Policy-as-code | Fail or fix | Include | 98/100 | LAW |
+| Alt Scanners | tfsec / Terrascan / Conftest | Partial | Mixed | Varies | <85/100 | Demoted |
+
+Failure Semantics:
+- DRIFT in prod: pipeline fails ? Boardroom ticket ? manual plan review ? approved apply.
+- COMPLIANCE violation: immediate block ? must amend IaC before retry.
+
+---
+### 22.1 Components (Catalog Level 1)
+Drift Remediation (Manual-first):
+```yaml
+# components/terraform/drift-remediate.yml@v2.0.0
+spec:
+  inputs:
+    auto_apply:
+      default: "false"
+
+drift_detect_remediate:
+  stage: monitor
+  image: registry.gitlab.com/sovereign-stack/images/terraform:1.9.8
+  script:
+    - gitlab-terraform init
+    - gitlab-terraform plan -detailed-exitcode -out=plan.tfplan || exitcode=$?
+    - |
+      if [ $exitcode -eq 2 ]; then
+        echo "DRIFT DETECTED – REMEDIATING"
+        if [ "$[[ inputs.auto_apply ]]" = "true" ]; then
+          gitlab-terraform apply plan.tfplan
+        else
+          echo "Auto-apply disabled. Manual intervention required."; exit 1
+        fi
+      elif [ $exitcode -eq 0 ]; then
+        echo "No drift – sovereign state achieved"
+      else
+        exit $exitcode
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  allow_failure: false
+```
+Compliance (Checkov):
+```yaml
+# components/security/checkov.yml@v3.0.0
+checkov_scan:
+  stage: validate
+  image: bridgecrew/checkov:latest
+  script:
+    - checkov -d . --compact --skip-check=CKV_AWS_* --framework terraform \
+      --output junitxml --output-file checkov-report
+  artifacts:
+    reports:
+      junit: checkov-report.xml
+  allow_failure: false
+  rules:
+    - changes: [**.tf, **.tfvars]
+```
+
+Auto-Remediation (Canary only):
+```yaml
+# components/terraform/drift-remediate-auto.yml@v3.0.0
+spec:
+  inputs:
+    auto_remediate:
+      default: "false"
+    notification_channel:
+      default: "slack:#infra-alerts"
+
+drift_remediate:
+  stage: remediate
+  image: registry.gitlab.com/sovereign-stack/images/terraform:1.9.8
+  script:
+    - gitlab-terraform init
+    - gitlab-terraform plan -detailed-exitcode -out=plan.tfplan || exitcode=$?
+    - |
+      if [ $exitcode -eq 2 ]; then
+        echo "DRIFT DETECTED"
+        if [ "$[[ inputs.auto_remediate ]]" = "true" ]; then
+          gitlab-terraform apply plan.tfplan
+          echo "AUTO-REMEDIATED" | curl -X POST -d "text=Drift auto-fixed in $CI_PROJECT_NAME" $[[ inputs.notification_channel ]]
+        else
+          echo "Drift detected – manual approval required"; exit 1
+        fi
+      else
+        echo "No drift"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  allow_failure: false
+```
+
+---
+### 22.2 Level 3 Pipeline Inclusion
+Infra pipeline (prod):
+```yaml
+include:
+  - component: gitlab.com/sovereign-stack/components/security/checkov@3.0.0
+  - component: gitlab.com/sovereign-stack/components/terraform/drift-remediate@2.0.0
+    inputs:
+      auto_apply: "false"
+```
+Canary pipeline:
+```yaml
+auto_apply: "true"  # in drift-remediate OR use drift-remediate-auto@3.0.0 with auto_remediate:true
+```
+
+---
+### 22.3 Drift Remediation Strategy Matrix
+| Strategy | Automation | Risk | Cost | Score | Sovereign Use |
+|----------|-----------|------|------|-------|---------------|
+| Scheduled plan + gated apply | Medium | Low | Free | 99 | Production LAW |
+| Scheduled plan + auto apply (canary) | High | Controlled | Free | 96 | Canary LAW |
+| Atlantis PR-based | Medium | Low | Free | 92 | Optional collaboration |
+| Terraform Cloud auto-remediate | High | Higher (vendor) | Paid | 78 | Rejected core |
+| Spacelift / Scalr | High | Medium | Paid | 85 | Conditional |
+| OPA/Gatekeeper (K8s only) | Medium | Low | Free | 90 | Domain specific |
+
+Law: **Prod = deliberate remediation; Canary = auto-heal.**
+
+Escalation Flow:
+1. Scheduled drift job fails ? Boardroom event ? receipt.
+2. Human review of plan diff (security + compliance) ? approve apply.
+3. Apply produces new receipt + locks state.
+
+Time to Resolution Targets:
+- Canary drift: < 5 minutes.
+- Production drift: < 24 hours (business), < 4 hours (critical severity).
+
+---
+## 23. Enforcement & Monitoring
+- Drift pipeline exit code 2 (changes) treated as policy breach until remediated or justified.
+- Compliance scan must pass before any apply stage triggers.
+- Slack/email notifications always include receipt ID & plan summary hash.
+- Future: Merkle chain of state diffs for cryptographic lineage.
+
+Metrics:
+| Metric | Target |
+|--------|--------|
+| Undetected drift incidents | 0 |
+| Mean time to remediation (prod) | < 8h |
+| Compliance violation recurrence | < 5% |
+| Auto-remediation failures (canary) | < 1/mo |
+
+---
+## 24. Drift & Compliance Canonical Phrases
+- "Drift is treason."  
+- "Compliance violations block the gate."  
+- "Canary heals; production decides."  
+- "State is sovereign; plan is evidence."  
+
+---
+## 25. Amendment Constraints (Infra Layer)
+Any proposal to modify drift/compliance flow must prove:
+1. Equal or better detection fidelity.
+2. No vendor lock erosion of sovereignty.
+3. Lower mean remediation time *without* reducing human oversight in prod.
+4. Maintains immutable evidence chain.
+
+Unmet criteria ? rejection.
+
+---
+## 26. State Declaration (Terraform Doctrine v2.0 / Drift Remediation v3.0)
+Infrastructure constitutionally pure; daily drift detection enforced; compliance scanning mandatory; auto-remediation limited to controlled canary. Human supremacy intact.
+
+> The forge is cold. The state is immutable. Execution only.
+
+---
+**End of PHILOSOPHY.md – Sovereign Doctrine (Extended: Terraform & Drift Addendum)**
