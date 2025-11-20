@@ -1,0 +1,10 @@
+pods:
+  - id: n0_e  node: node0  domain: evidence
+  - id: n0_p  node: node0  domain: property
+  - id: n0_o  node: node0  domain: ops
+  - id: n1_e  node: node1  domain: evidence
+  - id: n1_p  node: node1  domain: property
+  - id: n1_o  node: node1  domain: ops
+  - id: n2_e  node: node2  domain: evidence
+  - id: n2_p  node: node2  domain: property
+  - id: n2_o  node: node2  domain: ops
