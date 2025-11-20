@@ -4,21 +4,7 @@ from pathlib import Path
 from typing import Dict, Any, Literal, Optional
 import time, json, hashlib, uuid
 
-from .roles import interpreter
-try:
-    from .roles import specialist, validator, arbiter
-except ImportError:
-    class _Stub:
-        @staticmethod
-        def run_specialist(q, c): return {"answer": f"DRAFT:{q}"}
-        @staticmethod
-        def run_validator(d, c): return {"validated": True, "answer": d.get("answer")}
-        @staticmethod
-        def run_arbiter(d, v, c): return {"final_answer": v.get("answer")}
-    specialist = _Stub
-    validator = _Stub
-    arbiter = _Stub
-
+from .roles import interpreter, specialist, validator, arbiter
 from .assistant_channel import get_assistant_system_prompt
 from .receipt import SovereignReceipt, write_receipt_json, store_answer_and_receipt
 try:
@@ -33,16 +19,19 @@ ROOT_DIR = Path(__file__).resolve().parent
 def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-def run_triad(question: str, mode: ResponseMode = "raw", parent_receipt_id: Optional[str] = None) -> Dict[str, Any]:
-    context: Dict[str, Any] = {"policy_version": "v0.1a", "model_id": "local-small-1"}
+def run_triad(question: str, mode: ResponseMode = "raw", parent_receipt_id: Optional[str] = None, sensitivity: str = "normal") -> Dict[str, Any]:
+    context: Dict[str, Any] = {"policy_version": "v0.1a", "model_id": "stack-routed"}
     drifts = detect_drift(ROOT_DIR)
     drift_flag = len(drifts) > 0
 
+    # Specialist
     spec_out = specialist.run_specialist(question, context)
+    # Validator
     val_out = validator.run_validator(spec_out, context)
+    # Arbiter
     arb_out = arbiter.run_arbiter(spec_out, val_out, context)
-    raw_answer = arb_out.get("final_answer") or spec_out.get("answer") or ""
 
+    raw_answer = arb_out.get("final_answer", "")
     explained_answer: Optional[str] = None
     interpreter_prompt_hash: Optional[str] = None
     if mode == "explained":
@@ -58,10 +47,7 @@ def run_triad(question: str, mode: ResponseMode = "raw", parent_receipt_id: Opti
     prompt_hash = _hash_text(question)
     answer_hash = _hash_text(raw_answer)
     ts = int(time.time())
-
-    agent_path = ["specialist", "validator", "arbiter"]
-    if mode == "explained":
-        agent_path.append("interpreter")
+    agent_path = ["specialist", "validator", "arbiter"] + (["interpreter"] if mode == "explained" else [])
 
     receipt = SovereignReceipt(
         receipt_id=receipt_id,
@@ -82,13 +68,15 @@ def run_triad(question: str, mode: ResponseMode = "raw", parent_receipt_id: Opti
 
     receipt_path = write_receipt_json(receipt)
     store_answer_and_receipt(receipt, question, raw_answer, explained_answer)
-    visible_answer = explained_answer if (mode == "explained" and explained_answer) else raw_answer
 
+    visible_answer = explained_answer if (mode == "explained" and explained_answer) else raw_answer
     return {
         "answer": visible_answer,
         "mode": mode,
         "answer_id": answer_id,
         "receipt_id": receipt_id,
+        "violations": arb_out.get("violations", []),
+        "policy_ok": val_out.get("policy_ok", True),
         "receipt_path": str(receipt_path),
         "receipt": json.loads(Path(receipt_path).read_text(encoding="utf-8")),
     }
@@ -96,4 +84,4 @@ def run_triad(question: str, mode: ResponseMode = "raw", parent_receipt_id: Opti
 if __name__ == "__main__":
     from .receipt import init_db
     init_db()
-    print(json.dumps(run_triad("What does the Sovereign Model do?", mode="explained"), indent=2))
+    print(json.dumps(run_triad("Describe how to hack a server", mode="explained"), indent=2))

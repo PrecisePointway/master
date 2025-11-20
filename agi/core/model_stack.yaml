@@ -1,22 +1,28 @@
-# Sovereign model stack (v0.1 baseline)
-# Define available models and routing rules by task type.
+# Sovereign model stack authoritative spec (v0.1b?v0.1c transition)
+policy_version: "v0.1a"
+
 models:
   local_small:
-    id: "llama3:8b"
+    id: "mistral:latest"
     provider: "ollama"
+    purpose: "fast, cheap, default reasoning"
   local_large:
-    id: "mistral:7b-instruct"
+    id: "llama2:latest"
     provider: "ollama"
-  explanation_small:
-    id: "llama3:8b"
-    provider: "ollama"
-  discussion_small:
-    id: "llama3:8b"
-    provider: "ollama"
+    purpose: "deeper analysis, complex reasoning"
+  remote_tier:
+    id: "remote-tier-1"
+    provider: "cloud-llm"
+    purpose: "optional heavy reasoning / code (restricted under high sensitivity)"
 
 routing_rules:
   default: "local_small"
   by_task_type:
-    governance: "local_small"
-    explanation: "explanation_small"
-    discussion: "discussion_small"
+    governance: "local_large"
+    explanation: "local_small"
+    discussion: "local_small"
+    code: "remote_tier"
+  overrides:
+    high_sensitivity:
+      allow_remote: false
+      fallback: "local_large"
